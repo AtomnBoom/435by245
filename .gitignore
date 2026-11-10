@@ -1,0 +1,10 @@
+.venv/
+venv/
+**/dist/
+**/build/
+**/win-unpacked/
+*.exe
+node_modules/
+dist/
+build/
+*.log

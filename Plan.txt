@@ -1,0 +1,312 @@
+A.E.G.I.S. — Технический план реализации Phase 1
+
+Целевая платформа: Ryzen 5 / 16 GB RAM / Ollama
+Модели: qwen2.5:7b (~6 GB VRAM, 35–55 tok/s) для рутинных задач, qwen3.6:27b Q4_K_M (~20 GB VRAM с 16K ctx, 25–35 tok/s) для сложного кодинга и рефлексии; на 16 GB RAM одновременно держать обе модели нецелесообразно — роутер должен выгружать неактивную модель через keep_alive: 0 или переключать OLLAMA_MAX_LOADED_MODELS=1.
+Философия: «Контракт вместо кода». Любая замена реализации (SQLite → PostgreSQL, ChromaDB → Qdrant, python-docx → кастомный OOXML-рендерер) не трогает вызывающий код.
+
+ЭПИК 1: Инфраструктура Ядра и Контракты
+
+EP1.ST1 — Инициализация структуры репозитория и pyproject.toml
+
+Суть: Создать скелет монорепозитория с явным разделением contracts/ (только Protocol и dataclass-схемы, ноль импортов тяжёлых библиотек) и adapters/ (конкретные реализации).
+Файлы:
+
+· pyproject.toml — [project] с зависимостями: httpx, pydantic>=2, jsonschema, python-docx, python-pptx, openpyxl, chromadb, trafilatura, beautifulsoup4, lxml, aiofiles; [tool.ruff] line-length 100.
+· src/aegis/contracts/init.py
+· src/aegis/adapters/init.py
+· src/aegis/core/init.py
+· tests/init.py
+· .env.example — OLLAMA_HOST=http://localhost:11434
+, AEGIS_DB_PATH=./data/aegis.db, AEGIS_L0_PATH=./data/l0.jsonl.
+
+DoD: uv sync (или pip install -e .) завершается без ошибок; python -c "import aegis.contracts" возвращает 0.
+Extension Point: Добавление нового адаптера (например, adapters/postgres/) не требует изменения contracts/; контракты версионируются через git-теги.
+
+EP1.ST2 — Protocol-классы ядра
+
+Суть: Определить typing.Protocol (runtime-checkable) для всех сменных компонентов. Никаких ABC с реализацией — только сигнатуры.
+Файлы:
+
+· src/aegis/contracts/llm.py — AbstractLLM(Protocol): async def generate(prompt: str, *, model: str | None = None, temperature: float = 0.1, json_mode: bool = False, **kwargs) -> str; async def embed(texts: list[str], model: str = "bge-m3") -> list[list[float]].
+· src/aegis/contracts/memory.py — AbstractMemoryStore(Protocol): async def save_document_version(doc_id: str, ir: dict, parent_version: str | None) -> str; async def get_latest(doc_id: str) -> dict | None; async def log_modification(doc_id: str, diff: dict, source: Literal["agent","human"]) -> None.
+· src/aegis/contracts/tool.py — AbstractTool(Protocol): name: str; async def execute(**kwargs) -> dict.
+· src/aegis/contracts/vision.py — AbstractVision(Protocol): заглушка async def describe(image_bytes: bytes) -> str (Phase 1 не реализуется, но контракт фиксируется).
+· src/aegis/contracts/tts.py — AbstractTTS(Protocol): заглушка async def synthesize(text: str) -> bytes.
+· src/aegis/contracts/event_bus.py — AbstractEventBus(Protocol): async def publish(topic: str, payload: dict) -> None; def subscribe(topic: str) -> AsyncIterator[dict].
+
+DoD: mypy --strict src/aegis/contracts/ проходит; ни один файл в contracts/ не импортирует ollama, chromadb, docx, pptx (проверяется grep -r "import ollama|import chromadb|import docx|import pptx" src/aegis/contracts/ → пусто).
+Extension Point: Замена AbstractMemoryStore на PostgreSQL-адаптер реализует тот же Protocol; вызывающий код не меняется. Добавление AbstractVision в Phase 2 требует только нового адаптера.
+
+EP1.ST3 — Capability Registry с разрешением зависимостей
+
+Суть: Реализовать реестр, в котором адаптеры регистрируются по строковому ключу и разрешаются по Protocol-типу через isinstance(impl, runtime_checkable_protocol) или явный provides-список. Никаких прямых импортов адаптеров в бизнес-логике.
+Файлы:
+
+· src/aegis/core/registry.py — класс CapabilityRegistry:
+  · register(key: str, impl: Any, provides: list[type]) -> None
+  · resolve(contract: type[T]) -> T — если зарегистрировано несколько кандидатов, бросает AmbiguousCapabilityError с перечнем; если ноль — MissingCapabilityError.
+  · list_capabilities() -> dict[str, list[str]].
+· tests/test_registry.py — тест: два фейковых LLM-адаптера, resolve(AbstractLLM) возвращает зарегистрированный по умолчанию.
+
+DoD: pytest tests/test_registry.py зелёный; тест на ambiguity и missing реализован.
+Extension Point: В Phase 3 можно добавить resolve_all(contract) -> list[T] для мульти-модельного голосования без изменения сигнатуры resolve.
+
+EP1.ST4 — Локальная асинхронная Event Bus
+
+Суть: In-process pub/sub на asyncio.Queue. Никакого Redis/NATS в Phase 1. Гарантия: событие доставляется всем подписчикам, подписавшимся до публикации; подписчики, подписавшиеся после, не получают ретроспективу.
+Файлы:
+
+· src/aegis/core/event_bus.py — LocalEventBus(AbstractEventBus): внутренний dict[str, list[asyncio.Queue]]; publish кладёт payload в каждую очередь; subscribe возвращает async-генератор, читающий из очереди.
+· tests/test_event_bus.py — тест: подписчик получает событие, опубликованное после подписки; не получает — до.
+
+DoD: pytest tests/test_event_bus.py зелёный; таймаут подписки 30 с (тест не виснет вечно).
+Extension Point: Замена на Redis Streams или NATS — новый класс, реализующий AbstractEventBus, регистрируется в CapabilityRegistry; бизнес-код не меняется.
+
+ЭПИК 2: Единое Промежуточное Представление (IR) и Двусторонняя Память
+
+EP2.ST1 — Схема SQLite L1 и миграции
+
+Суть: Спроектировать таблицы L1: сессии, версии IR-дерева, learned_patterns, modification_log. Версионирование IR — через parent_version (DAG, не линейная история), чтобы поддерживать ветвление при ручных правках.
+Файлы:
+
+· src/aegis/adapters/memory/sqlite_store.py — SqliteMemoryStore(AbstractMemoryStore).
+· src/aegis/adapters/memory/migrations/001_initial.sql:
+  · sessions(id TEXT PRIMARY KEY, created_at TEXT, status TEXT)
+  · document_versions(id TEXT PRIMARY KEY, doc_id TEXT, parent_version TEXT NULL, ir_json TEXT NOT NULL, created_at TEXT, source TEXT CHECK(source IN ('agent','human','system')))
+  · learned_patterns(id TEXT PRIMARY KEY, task_signature TEXT NOT NULL, pattern_json TEXT NOT NULL, success_count INTEGER DEFAULT 1, last_used_at TEXT)
+  · modification_log(id INTEGER PRIMARY KEY AUTOINCREMENT, doc_id TEXT, from_version TEXT, to_version TEXT, diff_json TEXT NOT NULL, source TEXT CHECK(source IN ('agent','human')), created_at TEXT).
+  · Индексы: idx_versions_doc ON document_versions(doc_id, created_at DESC), idx_patterns_sig ON learned_patterns(task_signature).
+· src/aegis/adapters/memory/sqlite_store.py — async def init_db(path: str) применяет миграции идемпотентно (таблица schema_migrations(version INTEGER PRIMARY KEY)).
+
+DoD: pytest tests/test_sqlite_store.py: сохранение версии, получение get_latest, лог модификации с diff; повторный init_db не бросает ошибок.
+Extension Point: Схема PostgreSQL повторяет поля один-в-один; parent_version уже поддерживает DAG, поэтому переезд не требует миграции данных (только смена DSN).
+
+EP2.ST2 — L0 Raw Append-only JSONL логгер
+
+Суть: Каждое событие (промпт, ответ LLM, результат валидации, ручная правка, ошибка) дописывается в l0.jsonl с ts, event_type, payload_hash, payload. Формат append-only, ротация по размеру (100 MB на файл, 5 файлов).
+Файлы:
+
+· src/aegis/core/l0_logger.py — async def append(event_type: str, payload: dict); async def tail(n: int = 100) -> list[dict].
+· tests/test_l0_logger.py — проверка, что запись идемпотентна по payload_hash в пределах одной секунды (защита от дублирования при retry).
+
+DoD: pytest tests/test_l0_logger.py зелёный; wc -l data/l0.jsonl увеличивается на 1 после каждого вызова append.
+Extension Point: В Phase 2 L0 может экспортироваться в S3-совместимое хранилище без изменения вызывающего кода (новый sink в том же append).
+
+EP2.ST3 — Схема IR (JSON Schema) как единый контракт документа
+
+Суть: Определить document_ir.schema.json (draft 2020-12), от которого зависят все компиляторы и валидаторы. IR — это типизированное намерение, а не байты OOXML: модель не пишет XML, она заполняет IR.
+Файлы:
+
+· src/aegis/contracts/schemas/document_ir.schema.json — корневые поля: schema_version: "1.0", document_type: "docx"|"xlsx"|"pptx", metadata: {title, author, gost_standard?: "7.32-2017"}, blocks: Block[].
+  · Block — oneOf: {type:"heading", level:1-6, text}, {type:"paragraph", runs:[{text, bold?, italic?}], style?}, {type:"table", columns:[...], rows:[[...]], header_row:bool}, {type:"image", ref, width_cm?, height_cm?}, {type:"list", ordered:bool, items:[...]}.
+· src/aegis/contracts/schemas/init.py — load_schema(name: str) -> dict.
+· tests/test_ir_validation.py — валидный и невалидный IR; jsonschema.validate бросает ValidationError на невалидном.
+
+DoD: pytest tests/test_ir_validation.py зелёный; схема проходит check-jsonschema --check-metaschema.
+Extension Point: Добавление type:"chart" в Phase 2 расширяет oneOf, не ломая существующие компиляторы (они игнорируют неизвестные типы с warning, если strict=False).
+
+EP2.ST4 — Двусторонняя синхронизация IR ↔ modification_log
+
+Суть: Любая ручная правка в WYSIWYG (пока — программная, через API) порождает diff между from_version и to_version в формате RFC 6902 (JSON Patch) и пишется в modification_log. Агентские правки пишутся туда же с source:"agent".
+Файлы:
+
+· src/aegis/core/ir_diff.py — def diff_ir(old: dict, new: dict) -> list[dict] через jsonpatch.make_patch; def apply_patch(ir: dict, patch: list[dict]) -> dict.
+· src/aegis/adapters/memory/sqlite_store.py — log_modification принимает diff_json.
+
+DoD: pytest tests/test_ir_diff.py: patch round-trip (apply_patch(old, diff_ir(old, new)) == new).
+Extension Point: При переходе на OT/CRDT (для real-time collab) ir_diff можно заменить на CRDT-операции, не меняя modification_log (поле diff_json становится opaque).
+
+ЭПИК 3: Офисный Модуль PRO (Двигатель генерации и парсеры)
+
+EP3.ST1 — Компилятор JSON-IR → .docx (ГОСТ 7.32-2017) с XPath-валидацией
+
+Суть: Сгенерировать .docx через python-docx, затем распаковать zip и прогнать XPath-проверки по word/document.xml (в обход кэша python-docx) на соответствие ключевым требованиям ГОСТ: поля (левое 30 мм, правое 15 мм, верхнее/нижнее 20 мм), шрифт Times New Roman 14 pt, межстрочный 1.5, отступ первой строки 1.25 см, заголовки разделов прописными.
+Файлы:
+
+· src/aegis/adapters/office/docx_compiler.py — class DocxCompiler: def compile(ir: dict) -> bytes; def validate_gost(docx_bytes: bytes) -> list[Violation] с lxml.etree + namespaces w="http://schemas.openxmlformats.org/wordprocessingml/2006/main
+". XPath-примеры: //w:pgMar/@w:left, //w:rPr/w:sz/@w:val, //w:spacing/@w:line.
+· src/aegis/adapters/office/gost_rules.py — декларативные правила: {"margin_left_mm": 30, "font_size_pt": 14, "line_spacing": 1.5}.
+· tests/fixtures/sample_ir_docx.json.
+
+DoD: pytest tests/test_docx_compiler.py: скомпилированный документ открывается в LibreOffice без ошибок; validate_gost возвращает пустой список для эталонного IR и непустой — для IR с line_spacing=1.0.
+Extension Point: XPath-правила вынесены в gost_rules.py; добавление ГОСТ 7.32-2024 — новый файл правил, не трогая компилятор. При переходе на docxtpl или кастомный OOXML-рендерер DocxCompiler реализует тот же интерфейс compile(ir) -> bytes.
+
+EP3.ST2 — Компилятор JSON-IR → .xlsx (формулы, именованные диапазоны, параметры печати)
+
+Суть: openpyxl создаёт книгу; IR-блок type:"sheet" содержит name, columns, rows, formulas: {cell: "=SUM(A2:A10)"}, named_ranges: {name: "TaxRate", ref: "Sheet1!$B$1"}, print_area, orientation.
+Файлы:
+
+· src/aegis/adapters/office/xlsx_compiler.py — class XlsxCompiler: compile(ir: dict) -> bytes; запись формул с data_type="f".
+· tests/fixtures/sample_ir_xlsx.json — мульти-листовая книга: Inputs, Calculations, Report с cross-sheet формулами.
+
+DoD: pytest tests/test_xlsx_compiler.py: LibreOffice --headless пересчитывает формулы; значение в Calculations!B2 равно ожидаемому; print_area установлен.
+Extension Point: Добавление type:"pivot" в Phase 2 — новый обработчик в XlsxCompiler, не ломающий существующие листы.
+
+EP3.ST3 — Компилятор JSON-IR → .pptx (адаптивная сетка блоков, Gamma-like)
+
+Суть: IR для PPTX содержит slides: [{layout: "title|content|two_column|image_right", blocks: Block[]}]. Компилятор вычисляет позиции через 12-колоночную сетку (ширина слайда 13.333 in / 12 = 1.111 in на колонку) и размещает блоки с учётом span (1–12). Это не полный Fluid-Grid Gamma, но достаточный детерминированный субстрат для Phase 1.
+Файлы:
+
+· src/aegis/adapters/office/pptx_compiler.py — class PptxCompiler: compile(ir: dict) -> bytes; _layout_grid(slide_ir: dict) -> list[ShapeSpec]; ShapeSpec(left_in, top_in, width_in, height_in, block).
+· tests/fixtures/sample_ir_pptx.json — 3 слайда: титул, two-column с таблицей, image_right.
+
+DoD: pytest tests/test_pptx_compiler.py: python-pptx открывает результат; количество слайдов совпадает; shape.left/width не выходят за границы слайда (assert).
+Extension Point: Замена _layout_grid на реальный Fluid-Grid-алгоритм (или вызов внешнего layout-движка) не меняет compile(ir) -> bytes; IR остаётся тем же.
+
+EP3.ST4 — Фасад OfficeEngine и выбор компилятора по document_type
+
+Суть: Единая точка входа: OfficeEngine.compile(ir: dict) -> bytes разрешает компилятор через CapabilityRegistry по ключу f"office.{ir['document_type']}".
+Файлы:
+
+· src/aegis/adapters/office/engine.py — class OfficeEngine: init(registry: CapabilityRegistry); def compile(ir) -> bytes.
+· Регистрация в src/aegis/bootstrap.py.
+
+DoD: pytest tests/test_office_engine.py: для docx/xlsx/pptx возвращается bytes с правильной магией zip (PK\x03\x04); неизвестный document_type бросает MissingCapabilityError.
+Extension Point: Добавление document_type:"pdf" — регистрация office.pdf в registry, OfficeEngine не меняется.
+
+ЭПИК 4: Интерактивная State Machine и Адаптивный Роутинг
+
+EP4.ST1 — Определение состояний и переходов State Machine
+
+Суть: Явная FSM с состояниями: IDLE → PLANNING → GENERATING → VALIDATING → (REPAIRING ⇄ VALIDATING) → DONE; ветка WAITING_FOR_INPUT (прерывание пользователем) и INTERACTIVE (ручная правка IR, после которой возврат в VALIDATING).
+Файлы:
+
+· src/aegis/core/fsm.py — class TaskFSM: state: State; async def transition(event: Event) -> State; таблица переходов в TRANSITIONS: dict[tuple[State, Event], State].
+· src/aegis/core/events.py — enum Event: START, PLAN_READY, IR_READY, VALIDATION_PASSED, VALIDATION_FAILED, REPAIR_ATTEMPTED, USER_INTERRUPT, USER_EDIT_APPLIED, USER_RESUME.
+
+DoD: pytest tests/test_fsm.py: все легальные переходы проходят; нелегальный (IDLE + VALIDATION_PASSED) бросает InvalidTransitionError; INTERACTIVE + USER_RESUME → VALIDATING.
+Extension Point: Добавление состояния AWAITING_APPROVAL (human-in-the-loop) — новая строка в TRANSITIONS, не ломая существующие пути.
+
+EP4.ST2 — Адаптивный LLM-роутер (Qwen2.5-7B vs Qwen3.6-27B)
+
+Суть: Роутер выбирает модель по сигнатуре задачи: code_repair и complex_planning → qwen3.6:27b; doc_generation, summarization, classification → qwen2.5:7b. При нехватке RAM (проверка через psutil.virtual_memory().available < 8 GB) принудительно выбирается 7B. Выгрузка предыдущей модели — keep_alive: 0 в запросе к Ollama.
+Файлы:
+
+· src/aegis/adapters/llm/ollama_llm.py — class OllamaLLM(AbstractLLM): async def generate(prompt, *, model=None, **kwargs); HTTP-клиент httpx.AsyncClient(base_url=os.getenv("OLLAMA_HOST")), endpoint /api/generate; embed → /api/embed с model="bge-m3", возвращает list[list[float]] (1024 dim).
+· src/aegis/core/router.py — class AdaptiveRouter: def select_model(task_signature: str) -> str; async def generate(task_signature, prompt, **kwargs) -> str — перед вызовом проверяет доступную RAM и при необходимости выгружает другую модель.
+· tests/test_router.py — мок psutil.virtual_memory; проверка, что при < 8 GB выбирается 7B.
+
+DoD: pytest tests/test_router.py зелёный; при реальном вызове router.generate("doc_generation", "...") в логах Ollama виден qwen2.5:7b, при code_repair — qwen3.6:27b (или fallback на 7B, если RAM < 8 GB).
+Extension Point: Добавление qwen3-coder:30b — новая строка в таблице MODEL_MAP; AdaptiveRouter не меняется.
+
+EP4.ST3 — Docker-песочница для починки кода (валидация IR-схем и XPath)
+
+Суть: Если валидатор IR или XPath-валидатор ГОСТ возвращает ошибки, роутер направляет задачу в code_repair-ветку: LLM генерирует патч для компилятора/IR, патч применяется в изолированном Docker-контейнере (python:3.12-slim, --network none, --read-only, лимит 256 MB RAM), прогоняется тест; при успехе патч принимается, при неудаче — до 2 retry.
+Файлы:
+
+· src/aegis/core/sandbox.py — class DockerSandbox: async def run_patch(patch: str, test_cmd: str) -> SandboxResult; использует docker run --rm --network none --memory 256m -v /tmp/patch:/patch.
+· src/aegis/core/repair_loop.py — async def attempt_repair(errors: list[Violation], max_retries: int = 2) -> bool.
+· tests/test_sandbox.py — мок Docker-вызова (или pytest.mark.docker для интеграционного).
+
+DoD: pytest tests/test_sandbox.py зелёный (мок); интеграционный тест с реальным Docker: патч, ломающий синтаксис, отвергается; корректный патч применяется.
+Extension Point: Замена Docker на firecracker или gVisor — новый класс, реализующий SandboxProtocol; repair_loop не меняется.
+
+ЭПИК 5: Веб-Поиск и Асинхронный RAG
+
+EP5.ST1 — Асинхронный HTTP-клиент и извлечение контента
+
+Суть: httpx.AsyncClient с таймаутом 15 с, follow_redirects=True, User-Agent браузера. Основной экстрактор — trafilatura.extract(html, output_format="markdown", include_links=False, include_images=False); fallback — BeautifulSoup + markdownify.
+Файлы:
+
+· src/aegis/skills/web_research/fetcher.py — async def fetch(url: str) -> FetchedPage; dataclass FetchedPage(url, title, markdown, headings, content_hash).
+· src/aegis/skills/web_research/extractor.py — def extract(html: str, url: str) -> FetchedPage; trafilatura first, BeautifulSoup fallback.
+· tests/test_extractor.py — фикстура HTML; проверка, что markdown непустой, content_hash стабилен.
+
+DoD: pytest tests/test_extractor.py зелёный; на реальном URL (например, Wikipedia) fetch возвращает markdown > 100 символов.
+Extension Point: Добавление Playwright для SPA — fallback-ветка в extractor, не ломающая trafilatura.
+
+EP5.ST2 — Чанкинг и эмбеддинг (bge-m3 через Ollama)
+
+Суть: Разбиение markdown на чанки по 512 токенов с перекрытием 64 (рекурсивный сплиттер по заголовкам → параграфам → предложениям). Эмбеддинг — через OllamaLLM.embed с моделью bge-m3 (1024 dim, контекст 8192).
+Файлы:
+
+· src/aegis/skills/web_research/chunker.py — def chunk(markdown: str, max_tokens: int = 512, overlap: int = 64) -> list[Chunk]; Chunk(text, metadata: {source_url, heading_path}).
+· src/aegis/skills/web_research/embedder.py — async def embed_chunks(chunks: list[Chunk], llm: AbstractLLM) -> list[EmbeddedChunk].
+· tests/test_chunker.py — проверка, что чанки не превышают лимит и перекрытие присутствует.
+
+DoD: pytest tests/test_chunker.py зелёный; embed_chunks на 5 чанках возвращает 5 векторов длины 1024.
+Extension Point: Замена bge-m3 на nomic-embed-text (768 dim) — смена имени модели в вызове; размерность хранится в метаданных коллекции Chroma.
+
+EP5.ST3 — Персистентный индекс ChromaDB (два коллекции: temp и permanent)
+
+Суть: chromadb.PersistentClient(path="./data/chroma") — без сервера, просто директория. Две коллекции: web_temp (TLL 24 ч, чистится фоновой задачей) и web_permanent (ручное подтверждение релевантности). Синхронный клиент оборачивается в asyncio.to_thread, чтобы не блокировать event loop.
+Файлы:
+
+· src/aegis/adapters/vector/chroma_store.py — class ChromaVectorStore: async def add(collection: str, ids, embeddings, metadatas, documents); async def query(collection: str, query_embedding, k=5) -> list[SearchResult]; async def delete_older_than(collection: str, hours: int).
+· tests/test_chroma_store.py — временная директория; add → query → результат содержит нужный id.
+
+DoD: pytest tests/test_chroma_store.py зелёный; PersistentClient переживает перезапуск процесса (данные на диске).
+Extension Point: Замена на Qdrant — новый класс, реализующий AbstractVectorStore; web_research вызывает только интерфейс.
+
+EP5.ST4 — RAG-пайплайн web_research как AbstractTool
+
+Суть: Скилл принимает query: str, выполняет поиск через DuckDuckGo HTML (без API-ключа, httpx + BeautifulSoup для выдачи), фетчит топ-3 URL, чанкирует, эмбеддит, сохраняет в web_temp, делает query по коллекции и возвращает топ-5 чанков как контекст.
+Файлы:
+
+· src/aegis/skills/web_research/skill.py — class WebResearchSkill(AbstractTool): name = "web_research"; async def execute(query: str, k: int = 5) -> dict; возвращает {"chunks": [...], "sources": [...]}.
+· Регистрация в bootstrap.py как registry.register("tool.web_research", WebResearchSkill(...), provides=[AbstractTool]).
+
+DoD: pytest tests/test_web_research_skill.py (с моком HTTP): execute("...") возвращает chunks непустым, sources содержит URL.
+Extension Point: Добавление news-поиска (Google News RSS) — новый источник в skill.py, интерфейс execute не меняется.
+
+ЭПИК 6: Цикл Пост-задачной Рефлексии и Самообучения
+
+EP6.ST1 — Сборщик траектории (trajectory collector)
+
+Суть: После перехода FSM в DONE собрать цепочку: исходный промпт пользователя, IR, сгенерированный агентом, список ошибок валидатора (если были), патчи из repair_loop, ручные правки из modification_log (diff’ы с source:"human"). Запись — в l0.jsonl как event_type:"trajectory".
+Файлы:
+
+· src/aegis/core/reflection/trajectory.py — async def collect(task_id: str) -> Trajectory; Trajectory(task_id, prompt, agent_ir, validation_errors, repairs, human_diffs).
+· tests/test_trajectory.py — фикстура с заполненными L1/L0; проверка, что все поля заполнены.
+
+DoD: pytest tests/test_trajectory.py зелёный.
+Extension Point: Добавление vision_feedback в Phase 2 — новое поле в Trajectory, сборщик расширяется, downstream-потребители игнорируют неизвестные поля.
+
+EP6.ST2 — Генерация «кванта опыта» через Qwen3.6
+
+Суть: Промпт для qwen3.6:27b: «Дана траектория. Сформулируй одно правило (pattern), которое предотвратило бы ошибки валидатора и минимизировало бы ручные правки. Формат: {task_signature, rule, example_before, example_after}». Результат валидируется по learned_pattern.schema.json и депонируется в learned_patterns.
+Файлы:
+
+· src/aegis/core/reflection/pattern_extractor.py — async def extract(trajectory: Trajectory, llm: AbstractLLM) -> LearnedPattern; промпт-шаблон в prompts/reflection_pattern.md.
+· src/aegis/contracts/schemas/learned_pattern.schema.json — обязательные поля: task_signature, rule, example_before, example_after.
+· tests/test_pattern_extractor.py — мок LLM возвращает валидный JSON; проверка, что LearnedPattern создаётся.
+
+DoD: pytest tests/test_pattern_extractor.py зелёный; невалидный JSON от LLM бросает SchemaValidationError и не депонируется.
+Extension Point: Замена qwen3.6 на специализированную модель рефлексии — смена model в вызове; схема паттерна остаётся контрактом.
+
+EP6.ST3 — Механизм инъекции релевантного опыта в системный промпт
+
+Суть: Перед новой задачей вычислить task_signature (хеш от document_type + ключевых слов запроса), найти топ-3 паттерна в learned_patterns по task_signature (точное совпадение) или по эмбеддинговой близости (если точного нет — через bge-m3 и Chroma-коллекцию patterns). Вставить их в системный промпт как блок ## Learned Patterns (apply if relevant).
+Файлы:
+
+· src/aegis/core/reflection/injector.py — async def inject_patterns(task_signature: str, base_prompt: str, store: AbstractMemoryStore, vector_store: ChromaVectorStore) -> str.
+· src/aegis/core/reflection/signature.py — def make_signature(document_type: str, query: str) -> str (SHA-256 от нормализованной строки).
+· tests/test_injector.py — в store есть паттерн с совпадающей сигнатурой; inject_patterns возвращает промпт, содержащий rule.
+
+DoD: pytest tests/test_injector.py зелёный; при отсутствии паттернов промпт возвращается без изменений (идемпотентность).
+Extension Point: Добавление few-shot примеров в инъекцию — расширение шаблона, inject_patterns не меняет сигнатуру.
+
+EP6.ST4 — Фоновый воркер рефлексии (asyncio task, запускается после DONE)
+
+Суть: Подписаться на Event Bus topic task.done; в обработчике запустить asyncio.create_task(run_reflection(task_id)). Воркер не блокирует основной поток; при падении рефлексии ошибка логируется в L0 с event_type:"reflection_failed", но не влияет на статус задачи.
+Файлы:
+
+· src/aegis/core/reflection/worker.py — class ReflectionWorker: async def start(event_bus: AbstractEventBus); async def _handle_task_done(payload: dict).
+· src/aegis/bootstrap.py — регистрация воркера при старте приложения.
+· tests/test_reflection_worker.py — публикация task.done; через asyncio.sleep(0.1) проверка, что learned_patterns увеличился (с моком LLM).
+
+DoD: pytest tests/test_reflection_worker.py зелёный; основной event loop не блокируется (тест с параллельной задачей).
+Extension Point: Замена фонового asyncio-таска на очередь (Celery/RQ) в Phase 2 — ReflectionWorker реализует тот же интерфейс start(event_bus), но внутри использует очередь.
+
+Сводная таблица точек расширения (ключевые)
+
+Компонент Точка расширения Что не меняется при замене
+AbstractLLM Ollama → vLLM / llama.cpp / API Весь код, вызывающий generate/embed
+AbstractMemoryStore SQLite → PostgreSQL SqliteMemoryStore → PostgresMemoryStore, FSM и компиляторы
+AbstractVectorStore ChromaDB → Qdrant web_research, injector
+DocxCompiler python-docx → кастомный OOXML OfficeEngine.compile(ir)
+AdaptiveRouter 2 модели → N моделей Таблица MODEL_MAP, сигнатура generate
+SandboxProtocol Docker → gVisor repair_loop.attempt_repair
+AbstractVision / AbstractTTS Phase 2 Контракты уже зафиксированы в contracts/
+
+Критическое замечание по железу: qwen3.6:27b в Q4_K_M требует ~20 GB VRAM с 16K контекстом, что превышает 16 GB RAM целевой машины. Phase 1 должен либо использовать qwen2.5:7b как основную модель с fallback на 27B только при доступной дискретной VRAM ≥ 20 GB, либо перейти на qwen2.5:14b (~12 GB VRAM) как компромисс. AdaptiveRouter должен проверять не только RAM, но и наличие CUDA-устройства с достаточной VRAM перед выбором 27B.

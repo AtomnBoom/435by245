@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org",
+  "title": "AegisDocumentIR",
+  "type": "object",
+  "required": ["schema_version", "document_type", "metadata", "blocks"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "document_type": {
+      "type": "string",
+      "enum": ["docx", "xlsx", "pptx"]
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["title", "author"],
+      "properties": {
+        "title": { "type": "string" },
+        "author": { "type": "string" },
+        "gost_standard": { "type": "string", "enum": ["7.32-2017"] }
+      }
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type", "text"],
+            "properties": {
+              "type": { "type": "string", "enum": ["heading"] },
+              "level": { "type": "integer", "minimum": 1, "maximum": 6 },
+              "text": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["type", "runs"],
+            "properties": {
+              "type": { "type": "string", "enum": ["paragraph"] },
+              "runs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["text"],
+                  "properties": {
+                    "text": { "type": "string" },
+                    "bold": { "type": "boolean" },
+                    "italic": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["type", "sheets"],
+            "properties": {
+              "type": { "type": "string", "enum": ["spreadsheet"] },
+              "sheets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "cells"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "cells": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["coordinate", "value", "data_type"],
+                        "properties": {
+                          "coordinate": { 
+                            "type": "string", 
+                            "pattern": "^[A-Z]+[1-9][0-9]*$" 
+                          },
+                          "value": { "type": "string" },
+                          "data_type": { 
+                            "type": "string", 
+                            "enum": ["s", "n", "f"] 
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

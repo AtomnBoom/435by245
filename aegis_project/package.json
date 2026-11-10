@@ -1,0 +1,37 @@
+{
+  "name": "aegis-desktop",
+  "productName": "A.E.G.I.S. Desktop",
+  "version": "1.0.0",
+  "description": "A.E.G.I.S. Настольный интерфейс управления",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:exe": "electron-builder --win portable"
+  },
+  "keywords": [],
+  "author": "Core Engine Team",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.aegis.app",
+    "win": {
+      "target": "nsis",
+      "icon": "src/aegis/web/img/icon.ico",
+      "artifactName": "A.E.G.I.S..${ext}"
+    },
+    "extraResources": [
+      {
+        "from": "agent_bin",
+        "to": "agent_bin"
+      }
+    ],
+    "files": [
+      "src/aegis/web/**/*",
+      "main.js",
+      "preload.js"
+    ]
+  }
+}

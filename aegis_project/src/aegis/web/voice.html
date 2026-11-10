@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>A.E.G.I.S. Voice Call</title>
+    <link rel="stylesheet" href="css/voice.css">
+</head>
+<body>
+
+    <div class="voice-screen-container">
+        
+        <!-- Верхний системный индикатор состояния -->
+        <div class="voice-status-indicator" id="voiceStatus">Активация аудиокарты...</div>
+
+        <!-- Центральный стриминг реплик -->
+        <div class="voice-dialog-stream" id="dialogStream">
+            <div class="voice-bubble agent-speech">Привет! Рада тебя слышать. Как настроение?</div>
+        </div>
+
+        <!-- ЖЕЛЕЗНЫЙ ФИКС: Этот контейнер ДОЛЖЕН оборачивать и док, и панель ввода! -->
+        <div class="voice-interface-wrapper" id="interfaceWrapper">
+            
+            <!-- Панель круглых кнопок управления -->
+            <div class="voice-controls-dock">
+                <!-- Кнопка клавиатуры (ручной ввод) -->
+                <button class="dock-btn btn-secondary" id="switchToManualBtn" title="Открыть ручной ввод">
+                    <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 4h-2v-2h2v2zm0-3h-2V8h2v2z"/></svg>
+                </button>
+
+                <!-- Кнопка микрофона -->
+                <button class="dock-btn btn-primary mic-muted" id="toggleMicBtn" title="Включить микрофон">
+                    <svg viewBox="0 0 24 24" width="22" height="22" id="micIcon"><path fill="currentColor" d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
+                </button>
+
+                <!-- Кнопка сброса (Трубка) -->
+                <button class="dock-btn btn-danger" id="hangUpBtn" title="Завершить звонок">
+                    <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M21.1 15.46l-3.39-1.41c-.42-.17-.9-.07-1.22.25l-1.92 1.92c-2.6-1.41-4.73-3.54-6.14-6.14l1.92-1.92c.32-.32.42-.8.25-1.22L9.19 3.55c-.19-.44-.63-.73-1.12-.73H4.49c-.58 0-1.07.45-1.11 1.03C3.05 8.16 4.7 12.33 7.84 15.48c3.15 3.15 7.32 4.79 11.6 4.46.58-.04 1.03-.53 1.03-1.11v-2.25c0-.49-.29-.93-.73-1.12z"/></svg>
+                </button>
+            </div>
+
+            <!-- Скрытая выезжающая текстовая панель ввода -->
+            <div class="voice-manual-input-panel" id="manualInputPanel">
+                <input type="text" id="voicePromptInput" placeholder="Введите текстовый запрос..." autocomplete="off">
+                <button id="voiceSendTextBtn">➔</button>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- Скрипт подключен строго в самом конце, после загрузки всех HTML элементов -->
+    <script src="js/voice_engine.js"></script>
+</body>
+</html>

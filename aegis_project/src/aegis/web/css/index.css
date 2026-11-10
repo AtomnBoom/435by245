@@ -1,0 +1,82 @@
+/* ==========================================================================
+   INDEX.CSS — БЛОК 1: Верстка центированного контента главной страницы
+   ========================================================================== */
+
+.main-layout {
+    margin-left: 240px; 
+    width: calc(100% - 240px);
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+}
+
+.welcome-container {
+    width: 100%;
+    max-width: 760px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 36px;
+}
+
+.welcome-title {
+    font-size: 34px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    text-align: center;
+    margin: 0;
+    letter-spacing: -0.02em;
+    min-height: 50px; /* Предотвращает скачки интерфейса при смене фраз */
+}
+
+/* Сетка нижних информационных пиллов (Строгий бесцветный минимализм) */
+.suggested-pills-grid {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    width: 100%;
+}
+
+.suggest-pill {
+    background: #121214;
+    border: 1px solid var(--border-base);
+    border-radius: 20px;
+    padding: 10px 22px;
+    color: var(--color-text-cool);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+}
+
+.suggest-pill evils, .suggest-pill svg {
+    width: 18px;
+    height: 18px;
+    color: var(--color-text-cool); /* Иконки строго бесцветные, наследуют цвет текста */
+}
+
+.suggest-pill:hover {
+    background: var(--color-bg-hover);
+    border-color: #3F3F46;
+    color: #FFFFFF;
+}
+
+.suggest-pill:hover svg {
+    color: #FFFFFF;
+}
+
+@media (max-width: 768px) {
+    .main-layout {
+        margin-left: 72px;
+        width: calc(100% - 72px);
+    }
+    .suggested-pills-grid {
+        flex-direction: column;
+    }
+}

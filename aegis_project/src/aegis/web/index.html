@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A.E.G.I.S. — Главная</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/input_component.css">
+    <link rel="stylesheet" href="css/index.css">
+    <script src="js/input_engine.js"></script>
+    <script src="js/index.js"></script>
+
+
+</head>
+<body>
+
+    <!-- Сайдбар управления (Принудительно раскрыт на Главной) -->
+    <aside class="sidebar main-page-sidebar">
+        <div class="logo-container">
+            <svg class="logo-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" xmlns="http://w3.org">
+                <path d="M12 22C12 22 20 18 20 12V5L12 2L4 5V12C4 18 12 22 12 22Z" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="logo-text">A.E.G.I.S.</span>
+        </div>
+        
+        <nav class="sidebar-menu">
+            <a href="index.html" class="menu-item active">
+                <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                <span class="menu-label">Новый чат</span>
+            </a>
+            <a href="chat.html" class="menu-item">
+                <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span class="menu-label">Мои чаты</span>
+            </a>
+            <a href="projects.html" class="menu-item">
+                <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <span class="menu-label">Проекты</span>
+            </a>
+            <a href="coder.html" class="menu-item">
+                <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                <span class="menu-label">Кодер</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-bottom">
+            <a href="settings.html" class="menu-item">
+                <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                <span class="menu-label">Настройки</span>
+            </a>
+        </div>
+    </aside>
+
+    <!-- Основная рабочая область -->
+    <main class="main-layout">
+        <div class="welcome-container">
+            <h1 class="welcome-title" id="welcomeTitle"></h1>
+            
+            <div class="input-component-wrapper sticky-neon-border">
+                <div class="file-previews-container">
+                    <div class="file-previews" id="filePreviews"></div>
+                </div>
+                
+                <div class="input-zone">
+                    <div class="attach-btn-wrapper">
+                        <button class="action-btn attach-btn" id="attachBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                        </button>
+                        <div class="custom-tooltip" id="attachTooltip">
+                            <div class="tooltip-title">Прикрепить файлы</div>
+                            <div class="tooltip-body">Документы: .docx, .xlsx, .pptx, .pdf, .txt, .json</div>
+                            <div class="tooltip-body">Изображения: .png, .jpg, .jpeg, .webp, .gif</div>
+                            <div class="tooltip-body">Разработка: .sql, .lua, .py, .c, .cpp</div>
+                            <div class="tooltip-footer">Лимит: до 50 МБ • Поддерживается вставка картинок (Ctrl+V)</div>
+                        </div>
+                    </div>
+                    
+                    <textarea class="prompt-textarea" id="promptInput" rows="1" placeholder="Спросите A.E.G.I.S."></textarea>
+                    
+                    <button class="action-btn mutation-btn audio-state" id="mutationBtn" title="Голосовой ввод текста">
+                        <svg class="icon-voice" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 19v4M8 23h8"/></svg>
+                        <svg class="icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                    </button>
+                </div>
+
+                <div class="input-footer-panel">
+                    <div class="thinking-modes">
+                        <button class="mode-pill active" data-mode="aegis">
+                            <span class="mode-indicator"></span>A.E.G.I.S.
+                        </button>
+                        <button class="mode-pill" data-mode="research">Исследование</button>
+                        <button class="mode-pill" data-mode="reasoning">Рассуждение</button>
+                    </div>
+                    
+                    <button class="voice-call-trigger" id="voiceCallBtn">
+                        <span class="voice-label">Общаться голосом</span>
+                        <div class="voice-wave-icon" id="voiceWave">
+                            <span></span><span></span><span></span><span></span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            <div class="suggested-pills-grid">
+                <button class="suggest-pill" id="btnCapabilities">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    Что умеет A.E.G.I.S.
+                </button>
+                <button class="suggest-pill" id="btnInteresting">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    Интересное
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- 🛠️ ИСПРАВЛЕНО: Интегрирован модальный слой лайтбокса для предпросмотра картинок и документов на Главной -->
+    <div class="aegis-lightbox" id="aegisLightbox">
+        <img src="" class="aegis-lightbox-img" id="lightboxImg" alt="Просмотр">
+    </div>
+
+    <input type="file" id="hiddenFileInput" style="display: none;" accept=".docx,.xlsx,.pptx,.pdf,.txt,.json,.sql,.lua,.py,.c,.cpp,.png,.jpg,.jpeg,.webp,.gif" multiple>
+    <script src="js/input_engine.js"></script>
+</body>
+</html>
